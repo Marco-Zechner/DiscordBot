@@ -9,6 +9,7 @@ using DSharpPlus.SlashCommands;
 using DSharpPlus.Entities;
 using System.Linq;
 using System.Collections.Generic;
+using System.Data.OleDb;
 
 namespace DiscordBot
 {
@@ -73,6 +74,9 @@ namespace DiscordBot
 
             DiscordEmbed attachedEmbed = args.Message.Embeds[0];
 
+            List<string> data = attachedEmbed.Footer.Text.Split(new string[] { "°o°" }, StringSplitOptions.None).ToList();
+            int offsetHours = int.Parse(data[0]);
+
             List<DiscordMember> members = new List<DiscordMember>();
             var usersRaw = await args?.Guild?.GetAllMembersAsync();
             if (usersRaw != null)
@@ -80,39 +84,43 @@ namespace DiscordBot
                 members = usersRaw.ToList();
             }
 
-            GameData gameData = GameManager.GetOrCreateGameData(args.Message.Interaction.Id, attachedEmbed, members);
+            string time = ((DiscordButtonComponent)args.Message.Components.ToList()[0].Components.ToList()[1]).Label;
+            string date = attachedEmbed.Title;
 
-            var times = gameData.timePlayer.Keys.ToList();
-            times.Sort();
+            DateTimeOffset dateTime = DateTimeOffset.Parse($"{date} {time}");
+
+            GameData gameData = GameManager.GetOrCreateGameData(args.Message.Interaction.Id, attachedEmbed, dateTime, members);
 
             var player = args.Interaction.User as DiscordMember;
 
             switch (args.Interaction.Data.CustomId)
             {
+                case "gm_minus30":
+                    gameData.OffsetPlayer(player, false);
+                    break;
+                case "gm_plus30":
+                    gameData.OffsetPlayer(player, true);
+                    break;
                 case "gm_accept":
-                    gameData.MovePlayer(player, times[0]);
-                    break;
-                case "gm_30min":
-                    gameData.MovePlayer(player, times[1]);
-                    break;
-                case "gm_1h":
-                    gameData.MovePlayer(player, times[2]);
-                    break;
-                case "gm_2h":
-                    gameData.MovePlayer(player, times[3]);
+                    gameData.MovePlayer(player, dateTime);
                     break;
                 case "gm_decline":
                     gameData.DeclinePlayer(player);
                     break;
-                default:
+                case "gm_maybe":
                     gameData.MaybePlayer(player);
+                    break;
+                default:
+                    if (args.Interaction.Data.Values.Length != 1)
+                        break;
+                    gameData.MovePlayer(player, DateTimeOffset.Parse(args.Interaction.Data.Values[0]));
                     break;
             }
 
             await args.Interaction.CreateResponseAsync(InteractionResponseType.UpdateMessage, new DiscordInteractionResponseBuilder()
-            .AddEmbed(GameManager.CreateEmbed(gameData, members, attachedEmbed.Image?.Url.ToString(), attachedEmbed.Thumbnail?.Url.ToString()))
-            .AddComponents(GameManager.CreateButtons2(times[0]))
-            .AddComponents(GameManager.CreateButtons1(times[0]))
+            .AddEmbed(GameManager.CreateEmbed(gameData, members, data, attachedEmbed.Image?.Url.ToString(), attachedEmbed.Thumbnail?.Url.ToString()))
+            .AddComponents(GameManager.CreateButtons1(dateTime))
+            .AddComponents(GameManager.CreateDropdown(dateTime, offsetHours))
             );
         }
 

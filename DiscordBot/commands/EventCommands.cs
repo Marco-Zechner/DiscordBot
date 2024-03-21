@@ -24,6 +24,7 @@ namespace DiscordBot.commands
         public async Task LetsPlay(InteractionContext ctx,
             [Option("game", "The game that you want to play")] string game,
             [Option("time", "The time when you want to play")] string time,
+            [Option("offsetHours", "Wie viel Stunden davor und danach per Default")] long offsetHours = 12,
             [Option("date", "The date when you want to play")] string date = "",
             [Option("role", "The role that should be pinged")] DiscordRole role = null,
             [Option("background", "Large Image Below")] DiscordAttachment background = null,
@@ -43,6 +44,10 @@ namespace DiscordBot.commands
                 );
                 return;
             }
+
+            int minute = (dateTime.Minute + 15) / 30;
+            dateTime = dateTime.AddMinutes(-dateTime.Minute);
+            dateTime = dateTime.AddMinutes(minute * 30);
 
             if (background != null && background.MediaType.Split('/')[0] != "image")
             {
@@ -69,30 +74,21 @@ namespace DiscordBot.commands
 
             var members = await ctx.Guild.GetAllMembersAsync();
 
-            List<DateTimeOffset> dateTimes = new List<DateTimeOffset>()
-            {
-                dateTime,
-                new DateTimeOffset(dateTime.DateTime).AddMinutes(30),
-                new DateTimeOffset(dateTime.DateTime).AddMinutes(60),
-                new DateTimeOffset(dateTime.DateTime).AddMinutes(120),
-            };
-
             DiscordMember creator = ctx.User as DiscordMember;
 
             if (!creator.Roles.Contains(role))
                 creator = null;
 
-
-            var gameData = new GameData(game, dateTimes, creator, members.Where(m => m.Roles.Contains(role)).ToHashSet());
+            var gameData = new GameData(game, dateTime, creator, members.Where(m => m.Roles.Contains(role)).ToHashSet());
 
             GameManager.gameData.Add(ctx.Interaction.Id, gameData);
 
-            var embed = GameManager.CreateEmbed(gameData, members.ToList(), background?.Url, icon?.Url);
+            var embed = GameManager.CreateEmbed(gameData, members.ToList(), new List<string> { offsetHours.ToString() }, background?.Url, icon?.Url);
 
             await ctx.EditResponseAsync(new DiscordWebhookBuilder()
                 .AddEmbed(embed)
-                .AddComponents(GameManager.CreateButtons2(dateTime))
                 .AddComponents(GameManager.CreateButtons1(dateTime))
+                .AddComponents(GameManager.CreateDropdown(dateTime, (int)offsetHours))
                 );
         }
 

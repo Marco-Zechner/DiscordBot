@@ -3,7 +3,6 @@ using DSharpPlus.Entities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Collections;
 
 namespace DiscordBot
 {
@@ -11,26 +10,19 @@ namespace DiscordBot
     {
         public static readonly Dictionary<ulong, GameData> gameData = new Dictionary<ulong, GameData>();
 
-        public static GameData GetOrCreateGameData(ulong ID, DiscordEmbed embed, List<DiscordMember> members)
+        public static GameData GetOrCreateGameData(ulong ID, DiscordEmbed embed, DateTimeOffset time, List<DiscordMember> members)
         {
             if (gameData.ContainsKey(ID))
                 return gameData[ID];
-
-            string description = embed.Description.Substring(2);
-            string game = description.Split('-')[0].Trim();
-            string date = description.Split('-')[1].Trim();
+            string game = embed.Description.Substring(2).Trim();
+            string date = embed.Title.Trim();
 
             var fields = embed.Fields;
-
-            List<DateTimeOffset> times = new List<DateTimeOffset>();
 
             HashSet<DiscordMember> users = new HashSet<DiscordMember>();
 
             foreach (var field in fields)
             {
-                if (field.Name.Contains(':'))
-                    times.Add(DateTimeOffset.Parse($"{field.Name} {date}"));
-
                 if (field.Value == "-") continue;
 
                 string value = field.Value.TrimEnd('\n');
@@ -51,7 +43,8 @@ namespace DiscordBot
                 users.UnionWith(playerMembers);
             }
 
-            GameData gameDataFromEmbed = new GameData(game, times, null, users);
+
+            GameData gameDataFromEmbed = new GameData(game, time, null, users);
 
             foreach (var field in fields)
             {
@@ -74,7 +67,10 @@ namespace DiscordBot
 
                 if (field.Name.Contains(':'))
                 {
-                    gameDataFromEmbed.timePlayer[DateTimeOffset.Parse($"{field.Name} {date}")] = playerMembers;
+                    if (field.Name.Contains('.'))
+                        gameDataFromEmbed.TimePlayer[DateTimeOffset.Parse($"{field.Name}")] = playerMembers;
+                    else
+                        gameDataFromEmbed.TimePlayer[DateTimeOffset.Parse($"{field.Name} {date}")] = playerMembers;
                 }
                 else if (field.Name == "Declined")
                 {
@@ -89,12 +85,17 @@ namespace DiscordBot
             return gameDataFromEmbed;
         }
 
-        public static DiscordEmbedBuilder CreateEmbed(GameData gameData, List<DiscordMember> members, string imageUrl = null, string thumbnailUrl = null)
+        public static DiscordEmbedBuilder CreateEmbed(GameData gameData, List<DiscordMember> members, List<string> data, string imageUrl = null, string thumbnailUrl = null)
         {
             var embed = new DiscordEmbedBuilder
             {
-                Description = $"# {gameData.Game} - {gameData.Date:dd.MM.yyyy}",
+                Title = $"{gameData.DefaultDateTime:dd.MM.yyyy}",
+                Description = $"# {gameData.Game}",
                 Color = DiscordColor.Orange,
+                Footer = new DiscordEmbedBuilder.EmbedFooter
+                {
+                    Text = string.Join("°o°", data)
+                }
             };
 
             if (string.IsNullOrEmpty(imageUrl) == false)
@@ -112,10 +113,10 @@ namespace DiscordBot
 
             HashSet<DiscordMember> assingedPlayers = new HashSet<DiscordMember>();
 
-            foreach (var time in gameData.timePlayer.Keys)
+            foreach (var time in gameData.TimePlayer.Keys)
             {
                 string players = "";
-                foreach (var player in gameData.timePlayer[time])
+                foreach (var player in gameData.TimePlayer[time])
                 {
                     if (assingedPlayers.Contains(player)) continue;
 
@@ -123,22 +124,27 @@ namespace DiscordBot
                     {
                         players += $"{player.Mention}\n";
                     }
+
                     assingedPlayers.Add(player);
                 }
-                if (string.IsNullOrEmpty(players))
-                    players = "-";
-                embed.AddField(time.ToString("HH:mm"), players, true);
-            }
 
+                string fieldName = time.ToString("HH:mm");
+
+                if (time.Date != gameData.DefaultDateTime.Date)
+                    fieldName += time.ToString(" dd.MM");
+
+                if (!string.IsNullOrEmpty(players))
+                    embed.AddField(fieldName, players, true);
+            }
 
             string missingPlayers = "";
             foreach (var player in gameData.expectedPlayers.Where(p => !assingedPlayers.Contains(p) && !gameData.declinedPlayers.Contains(p) && !gameData.maybePlayers.Contains(p)))
             {
                 missingPlayers += $"{player.Mention}\n";
             }
-            if (string.IsNullOrEmpty(missingPlayers))
-                missingPlayers = "-";
-            embed.AddField("Missing", missingPlayers, true);
+            if (!string.IsNullOrEmpty(missingPlayers))
+                embed.AddField("Missing", missingPlayers, true);
+
 
 
             string declinedPlayers = "";
@@ -146,39 +152,56 @@ namespace DiscordBot
             {
                 declinedPlayers += $"{player.Mention}\n";
             }
-            if (string.IsNullOrEmpty(declinedPlayers))
-                declinedPlayers = "-";
-            embed.AddField("Declined", declinedPlayers, true);            
-            
+            if (!string.IsNullOrEmpty(declinedPlayers))
+                embed.AddField("Declined", declinedPlayers, true);
+
             string maybePlayers = "";
             foreach (var player in gameData.maybePlayers)
             {
                 maybePlayers += $"{player.Mention}\n";
             }
-            if (string.IsNullOrEmpty(maybePlayers))
-                maybePlayers = "-";
-            embed.AddField("Maybe", maybePlayers, true);
+            if (!string.IsNullOrEmpty(maybePlayers))
+                embed.AddField("Maybe", maybePlayers, true);
 
             return embed;
-        }
-
+        }      
+        
         public static DiscordComponent[] CreateButtons1(DateTimeOffset time)
         {
-            var min30Button = new DiscordButtonComponent(ButtonStyle.Secondary, "gm_30min", time.AddMinutes(30).ToString("HH:mm"));
-            var h1Button = new DiscordButtonComponent(ButtonStyle.Secondary, "gm_1h", time.AddMinutes(60).ToString("HH:mm"));
-            var h2Button = new DiscordButtonComponent(ButtonStyle.Secondary, "gm_2h", time.AddMinutes(120).ToString("HH:mm"));
-            var maybeButton = new DiscordButtonComponent(ButtonStyle.Secondary, "gm_maybe", "maybe");
-
-            return new DiscordComponent[] { min30Button, h1Button, h2Button, maybeButton };
-        }        
-        
-        public static DiscordComponent[] CreateButtons2(DateTimeOffset time)
-        {
+            var minus30Min = new DiscordButtonComponent(ButtonStyle.Secondary, "gm_minus30", "<<< 30");
             var acceptButton = new DiscordButtonComponent(ButtonStyle.Success, "gm_accept", time.ToString("HH:mm"));
+            var plus30Min = new DiscordButtonComponent(ButtonStyle.Secondary, "gm_plus30", "30 >>>");
             var declineButton = new DiscordButtonComponent(ButtonStyle.Danger, "gm_decline", "Decline");
+            var maybeButton = new DiscordButtonComponent(ButtonStyle.Primary, "gm_maybe", "maybe");
 
-            return new DiscordComponent[] { acceptButton, declineButton };
+            return new DiscordComponent[] { minus30Min, acceptButton, plus30Min, maybeButton, declineButton };
         }
 
+        public static DiscordSelectComponent CreateDropdown(DateTimeOffset dateTime, int hoursToDisplay)
+        {
+            hoursToDisplay *= 2;
+            hoursToDisplay--;
+            int stepsBack = hoursToDisplay - 2;
+            DateTimeOffset startTime = dateTime.AddMinutes(-stepsBack * 30);
+
+            var optionsDropdown = new List<DiscordSelectComponentOption>();
+
+            for (int i = 0; i < hoursToDisplay * 2; i++)
+            {
+                string option = startTime.ToString("HH:mm");
+
+                if (startTime.Date != dateTime.Date)
+                    option += " " + startTime.ToString("dd.MM");
+
+                if (startTime >= DateTimeOffset.Now)
+                    optionsDropdown.Add(new DiscordSelectComponentOption(option, option));
+
+                startTime = startTime.AddMinutes(30);
+            }
+
+            var dropdown = new DiscordSelectComponent("gm_time", "Select an option", optionsDropdown, false, 0, 1);
+
+            return dropdown;
+        }
     }
 }
